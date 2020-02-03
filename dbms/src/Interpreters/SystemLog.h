@@ -125,43 +125,42 @@ protected:
     Logger * log;
 
 private:
+    /* Main thread data */
     Context & context;
+
+    /* Saving thread data */
     const String database_name;
     const String table_name;
     const String storage_def;
     StoragePtr table;
+    bool is_prepared = false;
     const size_t flush_interval_milliseconds;
-
-    enum class EntryType
-    {
-        LOG_ELEMENT = 0,
-        AUTO_FLUSH,
-        FORCE_FLUSH,
-        SHUTDOWN,
-    };
-
-    /// Queue is bounded. But its size is quite large to not block in all normal cases.
-    std::vector<LogElement> queue;
-    uint64_t queue_front_index = 1;
-
-    /** In this thread, data is pulled from 'queue' and stored in 'data', and then written into table.
-      */
     ThreadFromGlobalPool saving_thread;
 
-    void threadFunction();
+    /* Data shared between callers of add()/flush()/shutdown(), and the saving thread */
+    std::mutex mutex;
+    /// Queue is bounded. But its size is quite large to not block in all normal cases.
+    std::vector<LogElement> queue;
+    // An always-incrementing index of the first message currently in the queue.
+    // We use it to give a global sequential index to every message, so that we can wait
+    // until a particular message is flushed. This is used to implement synchronous log
+    // flushing for SYSTEM FLUSH LOGS.
+    // The counter starts with one, so that we can use zero as an index before all
+    // messages without resorting to a signed type.
+    uint64_t queue_front_index = 1;
+    bool is_shutdown = false;
+    std::condition_variable flush_event;
+    // These refer to the same kind of sequential message index as queue_front_index.
+    uint64_t last_requested_flush = 0;
+    uint64_t last_flushed = 0;
+
+    void savingThreadFunction();
 
     /** Creates new table if it does not exist.
       * Renames old table if its structure is not suitable.
       * This cannot be done in constructor to avoid deadlock while renaming a table under locked Context when SystemLog object is created.
       */
-    bool is_prepared = false;
     void prepareTable();
-
-    std::mutex mutex;
-    bool is_shutdown = false;
-    std::condition_variable flush_event;
-    uint64_t last_requested_flush = 0;
-    uint64_t last_flushed = 0;
 
     /// flushImpl can be executed only in saving_thread.
     void flushImpl(const std::vector<LogElement> & to_flush, uint64_t last_entry_index);
@@ -180,7 +179,7 @@ SystemLog<LogElement>::SystemLog(Context & context_,
 {
     log = &Logger::get("SystemLog (" + database_name + "." + table_name + ")");
 
-    saving_thread = ThreadFromGlobalPool([this] { threadFunction(); });
+    saving_thread = ThreadFromGlobalPool([this] { savingThreadFunction(); });
 }
 
 
@@ -272,7 +271,7 @@ SystemLog<LogElement>::~SystemLog()
 
 
 template <typename LogElement>
-void SystemLog<LogElement>::threadFunction()
+void SystemLog<LogElement>::savingThreadFunction()
 {
     setThreadName("SystemLogFlush");
 
