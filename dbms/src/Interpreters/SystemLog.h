@@ -221,7 +221,7 @@ void SystemLog<LogElement>::flush()
 
     const uint64_t queue_end = queue_front_index + queue.size();
 
-    LOG_TRACE(log, "Will request flush up to " << toString(queue_end));
+    LOG_INFO(log, "Will request flush up to " << toString(queue_end));
 
     if (requested_flush_before < queue_end)
     {
@@ -239,7 +239,7 @@ void SystemLog<LogElement>::flush()
             ErrorCodes::TIMEOUT_EXCEEDED);
     }
 
-    LOG_TRACE(log, "Reported flush up to " << toString(queue_end));
+    LOG_INFO(log, "Reported flush up to " << toString(queue_end));
 }
 
 
@@ -298,7 +298,7 @@ void SystemLog<LogElement>::savingThreadFunction()
                 exit_this_thread = is_shutdown;
             }
 
-            LOG_TRACE(log, "Will flush up to " << to_flush_end);
+            LOG_INFO(log, "Will flush up to " << to_flush_end);
 
             if (to_flush.empty())
             {
@@ -320,7 +320,7 @@ void SystemLog<LogElement>::flushImpl(const std::vector<LogElement> & to_flush, 
 {
     try
     {
-        LOG_TRACE(log, "Flushing system log");
+        LOG_INFO(log, "Flushing system log");
 
         /// We check for existence of the table and create it as needed at every flush.
         /// This is done to allow user to drop the table at any moment (new empty table will be created automatically).
@@ -357,7 +357,7 @@ void SystemLog<LogElement>::flushImpl(const std::vector<LogElement> & to_flush, 
         flush_event.notify_all();
     }
 
-    LOG_TRACE(log, "Flushed up to " << to_flush_end);
+    LOG_INFO(log, "Flushed up to " << to_flush_end);
 }
 
 
