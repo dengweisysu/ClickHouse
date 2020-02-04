@@ -203,6 +203,7 @@ void SystemLog<LogElement>::add(const LogElement & element)
     {
         // TextLog sets its logger level to 0, so this log is a noop and there
         // is no recursive logging.
+        lock.unlock();
         LOG_ERROR(log, "Queue is full for system log '" + demangle(typeid(*this).name()) + "'.");
         return;
     }
@@ -221,8 +222,6 @@ void SystemLog<LogElement>::flush()
 
     const uint64_t queue_end = queue_front_index + queue.size();
 
-    LOG_INFO(log, "Will request flush up to " << toString(queue_end));
-
     if (requested_flush_before < queue_end)
     {
         requested_flush_before = queue_end;
@@ -239,6 +238,7 @@ void SystemLog<LogElement>::flush()
             ErrorCodes::TIMEOUT_EXCEEDED);
     }
 
+    lock.unlock();
     LOG_INFO(log, "Reported flush up to " << toString(queue_end));
 }
 
