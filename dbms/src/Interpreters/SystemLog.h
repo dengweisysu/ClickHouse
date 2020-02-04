@@ -125,10 +125,8 @@ protected:
     Logger * log;
 
 private:
-    /* Main thread data */
-    Context & context;
-
     /* Saving thread data */
+    Context & context;
     const String database_name;
     const String table_name;
     const String storage_def;
@@ -145,14 +143,13 @@ private:
     // We use it to give a global sequential index to every message, so that we can wait
     // until a particular message is flushed. This is used to implement synchronous log
     // flushing for SYSTEM FLUSH LOGS.
-    // The counter starts with one, so that we can use zero as an index before all
-    // messages without resorting to a signed type.
-    uint64_t queue_front_index = 1;
+    uint64_t queue_front_index = 0;
     bool is_shutdown = false;
     std::condition_variable flush_event;
-    // These refer to the same kind of sequential message index as queue_front_index.
-    uint64_t last_requested_flush = 0;
-    uint64_t last_flushed = 0;
+    // Requested to flush logs up to this index, exclusive
+    uint64_t requested_flush_before = 0;
+    // Flushed log up to this index, exclusive
+    uint64_t flushed_before = 0;
 
     void savingThreadFunction();
 
@@ -163,7 +160,7 @@ private:
     void prepareTable();
 
     /// flushImpl can be executed only in saving_thread.
-    void flushImpl(const std::vector<LogElement> & to_flush, uint64_t last_entry_index);
+    void flushImpl(const std::vector<LogElement> & to_flush, uint64_t to_flush_end);
 };
 
 
@@ -194,10 +191,10 @@ void SystemLog<LogElement>::add(const LogElement & element)
     if (queue.size() >= DBMS_SYSTEM_LOG_QUEUE_SIZE / 2)
     {
         // The queue more than half full, time to flush.
-        const uint64_t last_entry = queue_front_index + queue.size() - 1;
-        if (last_requested_flush < last_entry)
+        const uint64_t queue_end = queue_front_index + queue.size();
+        if (requested_flush_before < queue_end)
         {
-            last_requested_flush = last_entry;
+            requested_flush_before = queue_end;
         }
         flush_event.notify_all();
     }
@@ -222,17 +219,17 @@ void SystemLog<LogElement>::flush()
     if (is_shutdown)
         return;
 
-    const uint64_t entry_index = queue_front_index + queue.size() - 1;
+    const uint64_t queue_end = queue_front_index + queue.size();
 
-    if (last_requested_flush < entry_index)
+    if (requested_flush_before < queue_end)
     {
-        last_requested_flush = entry_index;
+        requested_flush_before = queue_end;
     }
     flush_event.notify_all();
 
     const int timeout_seconds = 60;
     bool result = flush_event.wait_for(lock, std::chrono::seconds(timeout_seconds),
-        [&] { return last_flushed >= entry_index; });
+        [&] { return flushed_before >= queue_end; });
 
     if (!result)
     {
@@ -281,15 +278,17 @@ void SystemLog<LogElement>::savingThreadFunction()
         try
         {
             std::vector<LogElement> to_flush;
-            uint64_t last_entry_index = 0;
+            // The end index (exclusive, like std end()) of the messages we are
+            // going to flush.
+            uint64_t to_flush_end = 0;
 
             {
                 std::unique_lock lock(mutex);
                 flush_event.wait_for(lock, std::chrono::milliseconds(flush_interval_milliseconds),
-                                     [&] () { return last_requested_flush > last_flushed || is_shutdown; });
+                    [&] () { return requested_flush_before > flushed_before || is_shutdown; });
 
                 queue_front_index += queue.size();
-                last_entry_index = queue_front_index - 1;
+                to_flush_end = queue_front_index;
                 queue.swap(to_flush);
 
                 exit_this_thread = is_shutdown;
@@ -300,7 +299,7 @@ void SystemLog<LogElement>::savingThreadFunction()
                 continue;
             }
 
-            flushImpl(to_flush, last_entry_index);
+            flushImpl(to_flush, to_flush_end);
         }
         catch (...)
         {
@@ -311,7 +310,7 @@ void SystemLog<LogElement>::savingThreadFunction()
 
 
 template <typename LogElement>
-void SystemLog<LogElement>::flushImpl(const std::vector<LogElement> & to_flush, uint64_t last_entry_index)
+void SystemLog<LogElement>::flushImpl(const std::vector<LogElement> & to_flush, uint64_t to_flush_end)
 {
     try
     {
@@ -347,7 +346,7 @@ void SystemLog<LogElement>::flushImpl(const std::vector<LogElement> & to_flush, 
     }
 
     std::unique_lock lock(mutex);
-    last_flushed = last_entry_index;
+    flushed_before = to_flush_end;
     flush_event.notify_all();
 }
 
