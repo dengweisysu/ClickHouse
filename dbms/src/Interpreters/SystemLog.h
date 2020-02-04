@@ -221,6 +221,8 @@ void SystemLog<LogElement>::flush()
 
     const uint64_t queue_end = queue_front_index + queue.size();
 
+    LOG_TRACE(log, "Will request flush up to " << toString(queue_end));
+
     if (requested_flush_before < queue_end)
     {
         requested_flush_before = queue_end;
@@ -236,6 +238,8 @@ void SystemLog<LogElement>::flush()
         throw Exception("Timeout exceeded (" + toString(timeout_seconds) + " s) while flushing system log '" + demangle(typeid(*this).name()) + "'.",
             ErrorCodes::TIMEOUT_EXCEEDED);
     }
+
+    LOG_TRACE(log, "Reported flush up to " << toString(queue_end));
 }
 
 
@@ -294,6 +298,8 @@ void SystemLog<LogElement>::savingThreadFunction()
                 exit_this_thread = is_shutdown;
             }
 
+            LOG_TRACE(log, "Will flush up to " << to_flush_end);
+
             if (to_flush.empty())
             {
                 continue;
@@ -345,9 +351,13 @@ void SystemLog<LogElement>::flushImpl(const std::vector<LogElement> & to_flush, 
         tryLogCurrentException(__PRETTY_FUNCTION__);
     }
 
-    std::unique_lock lock(mutex);
-    flushed_before = to_flush_end;
-    flush_event.notify_all();
+    {
+        std::unique_lock lock(mutex);
+        flushed_before = to_flush_end;
+        flush_event.notify_all();
+    }
+
+    LOG_TRACE(log, "Flushed up to " << to_flush_end);
 }
 
 
