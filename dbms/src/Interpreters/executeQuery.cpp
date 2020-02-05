@@ -417,6 +417,10 @@ static std::tuple<ASTPtr, BlockIO> executeQueryImpl(
                 if (auto query_log = context.getQueryLog())
                     query_log->add(elem);
             }
+            else
+            {
+                LOG_INFO(&Logger::get("executeQuery"), "log_queries = false");
+            }
 
             /// Also make possible for caller to log successful query finish and exception during execution.
             auto finish_callback = [elem, &context, log_queries] (IBlockInputStream * stream_in, IBlockOutputStream * stream_out) mutable

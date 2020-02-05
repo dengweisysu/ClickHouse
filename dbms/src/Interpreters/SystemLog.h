@@ -186,7 +186,11 @@ void SystemLog<LogElement>::add(const LogElement & element)
     std::unique_lock lock(mutex);
 
     if (is_shutdown)
+    {
+        lock.unlock();
+        LOG_INFO(log, "System log is shutdown");
         return;
+    }
 
     if (queue.size() >= DBMS_SYSTEM_LOG_QUEUE_SIZE / 2)
     {
@@ -209,6 +213,9 @@ void SystemLog<LogElement>::add(const LogElement & element)
     }
 
     queue.push_back(element);
+
+    lock.unlock();
+    LOG_INFO(log, "Added message to system log");
 }
 
 
@@ -218,7 +225,11 @@ void SystemLog<LogElement>::flush()
     std::unique_lock lock(mutex);
 
     if (is_shutdown)
+    {
+        lock.unlock();
+        LOG_INFO(log, "flush: is shutdown");
         return;
+    }
 
     const uint64_t queue_end = queue_front_index + queue.size();
 
